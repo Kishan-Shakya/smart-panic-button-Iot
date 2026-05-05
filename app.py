@@ -11,7 +11,7 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # 🔐 Firebase Init
-cred = credentials.Certificate("serviceAccountKey.json")
+cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://ai-powered-road-accident-prev-default-rtdb.firebaseio.com'
 })
