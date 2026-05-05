@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guardian Eye | Smart Panic Dashboard</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS (Play CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        'hardware-bg': '#151619',
+                        'hardware-card': '#1E1F23',
+                        'hardware-accent': '#FF4444',
+                        'hardware-secondary': '#8E9299',
+                        'hardware-green': '#00C853',
+                    },
+                    animation: {
+                        'pulse-danger': 'pulse-danger 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'scan': 'scan 3s linear infinite',
+                    },
+                    keyframes: {
+                        'pulse-danger': {
+                            '0%, 100%': { opacity: 1, backgroundColor: '#FF4444' },
+                            '50%': { opacity: 0.5, backgroundColor: '#8B0000' },
+                        },
+                        'scan': {
+                            '0%': { transform: 'translateY(-100%)', opacity: 0 },
+                            '50%': { opacity: 0.5 },
+                            '100%': { transform: 'translateY(100%)', opacity: 0 },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0A0B0D;
+            color: #E2E2E2;
+            overflow-x: hidden;
+        }
+        .hardware-panel {
+            border: 1px solid rgba(142, 146, 153, 0.1);
+            background: linear-gradient(135deg, #1E1F23 0%, #151619 100%);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .panic-btn-glow {
+            box-shadow: 0 0 20px rgba(255, 68, 68, 0.4);
+        }
+        .panic-btn-active {
+            box-shadow: 0 0 40px rgba(255, 68, 68, 0.8);
+            animation: pulse-danger 1s infinite;
+        }
+        #map {
+            filter: grayscale(1) invert(0.9) hue-rotate(180deg) brightness(0.8) contrast(1.2);
+            border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.1);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased h-screen flex flex-col md:flex-row">
+
+    <!-- Sidebar Navigation -->
+    <aside class="w-full md:w-20 lg:w-24 bg-hardware-bg border-r border-white/5 flex flex-row md:flex-col items-center py-4 md:py-8 space-y-0 md:space-y-8 px-4 md:px-0 justify-between md:justify-start z-50">
+        <div class="flex items-center justify-center p-2 rounded-xl bg-hardware-accent/10">
+            <i data-lucide="shield-alert" class="w-8 h-8 text-hardware-accent"></i>
+        </div>
+        <nav class="flex flex-row md:flex-col space-x-4 md:space-x-0 md:space-y-6">
+            <button class="p-3 text-white bg-white/5 rounded-xl"><i data-lucide="layout-grid" class="w-6 h-6"></i></button>
+            <button class="p-3 text-white/40 hover:text-white transition-colors"><i data-lucide="map" class="w-6 h-6"></i></button>
+            <button class="p-3 text-white/40 hover:text-white transition-colors"><i data-lucide="users" class="w-6 h-6"></i></button>
+            <button class="p-3 text-white/40 hover:text-white transition-colors"><i data-lucide="settings" class="w-6 h-6"></i></button>
+        </nav>
+        <div class="hidden md:flex flex-col mt-auto space-y-4 items-center">
+            <div class="w-2 h-2 rounded-full bg-hardware-green animate-pulse"></div>
+            <i data-lucide="power" class="w-5 h-5 text-white/20"></i>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 overflow-y-auto custom-scrollbar p-6 lg:p-10">
+        
+        <!-- Header -->
+        <header class="flex flex-col lg:flex-row lg:items-end justify-between mb-10 space-y-4 lg:space-y-0">
+            <div>
+                <div class="flex items-center space-x-2 text-hardware-accent mb-1">
+                    <span class="w-2 h-2 bg-hardware-accent rounded-full"></span>
+                    <span class="text-[10px] font-mono tracking-widest uppercase">Emergency Response Network</span>
+                </div>
+                <h1 class="text-4xl font-bold tracking-tight">System Overview</h1>
+                <p class="text-hardware-secondary text-sm font-medium mt-1">Status: <span id="system-status-text" class="text-hardware-green">Nominal / Online</span></p>
+            </div>
+            
+            <div class="flex items-center space-x-4 bg-hardware-card p-3 rounded-2xl border border-white/5">
+                <div class="text-right">
+                    <p class="text-[10px] text-hardware-secondary font-mono uppercase">Local Time</p>
+                    <p id="clock" class="text-lg font-mono font-bold tracking-tight text-white">00:00:00</p>
+                </div>
+                <div class="h-8 w-px bg-white/10 mx-2"></div>
+                <div class="text-right">
+                    <p class="text-[10px] text-hardware-secondary font-mono uppercase">Battery</p>
+                    <div class="flex items-center space-x-2">
+                        <span id="battery-pct" class="text-lg font-mono font-bold text-hardware-green">98%</span>
+                        <div class="w-8 h-4 border border-white/20 rounded-sm p-0.5 relative">
+                            <div id="battery-fill" class="h-full bg-hardware-green" style="width: 98%;"></div>
+                            <div class="absolute -right-1.5 top-1 w-1 h-2 bg-white/20 rounded-r-sm"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Grid Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <!-- Left Column: Primary Stats & Call to Action -->
+            <div class="lg:col-span-8 space-y-8">
+                
+                <!-- Button Status Section -->
+                <section class="hardware-panel rounded-3xl p-8 relative overflow-hidden">
+                    <div class="relative z-10 flex flex-col md:flex-row items-center justify-between space-y-8 md:space-y-0">
+                        <div class="max-w-md text-center md:text-left">
+                            <h2 class="text-3xl font-bold mb-4">Device Status</h2>
+                            <p class="text-hardware-secondary text-sm leading-relaxed mb-6">
+                                Monitoring real-time telemetry from the smart panic device. The indicator reflects current hardware state and signal strength.
+                            </p>
+                            <div class="flex flex-wrap gap-4 justify-center md:justify-start">
+                                <div class="bg-white/5 border border-white/10 px-4 py-2 rounded-xl flex items-center space-x-2">
+                                    <i data-lucide="navigation" class="w-4 h-4 text-hardware-accent"></i>
+                                    <span class="text-xs font-mono">27.4924° N, 77.6737° E</span>
+                                </div>
+                                <div class="bg-white/5 border border-white/10 px-4 py-2 rounded-xl flex items-center space-x-2">
+                                    <i data-lucide="wifi" class="w-4 h-4 text-hardware-green"></i>
+                                    <span class="text-xs font-mono">Signal Stable</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="relative">
+                            <!-- Status Indicator -->
+                            <div id="status-ring" class="absolute inset-0 scale-150 border-2 border-hardware-green/20 rounded-full animate-ping opacity-0"></div>
+                            <div 
+                                id="status-button"
+                                class="relative w-48 h-48 md:w-56 md:h-56 bg-hardware-green rounded-full flex flex-col items-center justify-center space-y-2 transform transition-all duration-500 select-none shadow-[0_0_20px_rgba(0,200,83,0.3)]"
+                            >
+                                <span class="absolute inset-2 border-4 border-white/20 rounded-full"></span>
+                                <i id="status-icon" data-lucide="shield-check" class="w-16 h-16 text-white transition-transform"></i>
+                                <span id="status-text" class="text-xl font-black uppercase tracking-tighter text-white">System Safe</span>
+                                <span class="text-[10px] uppercase font-bold text-white/60 tracking-widest">Active Monitoring</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Map Section -->
+                <section class="hardware-panel rounded-3xl p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center">
+                                <i data-lucide="map-pin" class="w-5 h-5 text-hardware-accent"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-bold tracking-tight">Live Location Tracking</h3>
+                                <p class="text-xs text-hardware-secondary">Historical Path & Current Coordinates</p>
+                            </div>
+                        </div>
+                        <button class="text-xs font-mono text-hardware-accent bg-hardware-accent/10 px-3 py-1.5 rounded-lg border border-hardware-accent/20 hover:bg-hardware-accent/20 transition-colors">
+                            Recenter View
+                        </button>
+                    </div>
+                    <div class="h-96 w-full rounded-2xl bg-black/40 border border-white/5 overflow-hidden relative">
+                        <div id="map" class="h-full w-full"></div>
+                        <!-- UI Overlay on Map -->
+                        <div class="absolute bottom-4 left-4 z-[1000] bg-hardware-bg/90 backdrop-blur-md border border-white/10 p-3 rounded-xl min-w-[200px]">
+                            <p class="text-[10px] font-mono text-hardware-secondary uppercase mb-1">Latest Update</p>
+                            <p id="map-update-time" class="text-xs font-bold">Just now</p>
+                            <div class="h-px bg-white/10 my-2"></div>
+                            <div class="flex items-center justify-between text-xs">
+                                <span class="text-hardware-secondary">Speed</span>
+                                <span class="font-mono">0.4 km/h</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+
+            <!-- Right Column: System Stats -->
+            <div class="lg:col-span-4 space-y-8">
+                
+                <!-- Weather / Danger Card -->
+                <section id="weather-card" class="hardware-panel rounded-3xl p-6 bg-gradient-to-br from-hardware-card to-hardware-bg">
+                    <div class="flex items-start justify-between mb-4">
+                        <div>
+                            <p class="text-[10px] font-mono text-hardware-secondary uppercase tracking-widest mb-1">Local Environment</p>
+                            <h3 id="weather-condition" class="text-xl font-bold">Checking Weather...</h3>
+                        </div>
+                        <div id="weather-icon-container" class="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center">
+                            <i data-lucide="cloud-lightning" class="w-6 h-6 text-hardware-secondary"></i>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <p id="weather-description" class="text-sm text-hardware-secondary">Connecting to weather monitor...</p>
+                        <hr class="border-white/5">
+                        <div id="danger-alert" class="hidden flex items-center p-3 bg-red-500/10 border border-red-500/20 rounded-xl space-x-3 transition-all">
+                            <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                            <span class="text-xs font-bold text-red-500 tracking-tight">EXTREME WEATHER WARNING</span>
+                        </div>
+                        <div id="safe-alert" class="flex items-center p-3 bg-green-500/10 border border-green-500/20 rounded-xl space-x-3 transition-all">
+                            <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                            <span class="text-xs font-bold text-green-500 tracking-tight">Environmental Status: Low Risk</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Activity Log -->
+                <section class="hardware-panel rounded-3xl p-6">
+                    <h3 class="font-bold mb-4">Activation History</h3>
+                    <div class="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-2" id="event-history">
+                        <!-- History items will be injected here -->
+                        <div class="flex items-start space-x-3 p-3 bg-white/5 rounded-2xl border border-white/5 opacity-50">
+                            <div class="w-px h-12 bg-white/10 mt-1 relative">
+                                <div class="absolute top-0 -left-1 w-2 h-2 rounded-full bg-hardware-secondary"></div>
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-xs font-bold">System Initialization</p>
+                                <div class="flex flex-wrap gap-x-4 mt-1">
+                                    <p class="text-[10px] text-hardware-secondary font-mono uppercase">04 May 2026</p>
+                                    <p class="text-[10px] text-hardware-secondary font-mono uppercase">19:10:32</p>
+                                </div>
+                                <p class="text-[10px] text-hardware-secondary font-mono mt-1 italic">Location: Gla University (Default)</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Overlay Alerts -->
+    <div id="emergency-overlay" class="fixed inset-0 bg-red-900/40 backdrop-blur-3xl z-[10000] hidden items-center justify-center p-6 text-center">
+        <div class="max-w-md w-full hardware-panel rounded-[40px] p-10 border-red-500/50 relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-1 bg-red-500 animate-pulse"></div>
+            <div class="mb-8">
+                <i data-lucide="alert-octagon" class="w-24 h-24 text-red-500 mx-auto animate-bounce"></i>
+            </div>
+            <h2 class="text-4xl font-black text-white mb-4 uppercase tracking-tighter">Emergency Active</h2>
+            <p class="text-white/70 mb-8 leading-relaxed">System is broadcasting your location. Emergency services have been contacted. Stay where you are and remain visible.</p>
+            <button id="cancel-panic" class="w-full py-4 rounded-2xl bg-white text-hardware-bg font-bold hover:bg-white/90 transition-colors uppercase tracking-widest text-sm">Dismiss Overlay</button>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        // --- Initialization ---
+        lucide.createIcons();
+        
+        let map, marker, pathLine;
+        const defaultLat = 27.60147256;
+        const defaultLon = 77.59771284;
+
+        function initMap() {
+            map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false
+            }).setView([defaultLat, defaultLon], 15);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            const customIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="w-6 h-6 bg-hardware-accent rounded-full border-2 border-white panic-btn-glow flex items-center justify-center">
+                        <div class="w-2 h-2 bg-white rounded-full animate-ping"></div>
+                       </div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            marker = L.marker([defaultLat, defaultLon], { icon: customIcon }).addTo(map);
+            pathLine = L.polyline([], { color: '#FF4444', weight: 3, opacity: 0.6 }).addTo(map);
+        }
+
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toTimeString().split(' ')[0];
+        }
+
+        // --- UI State Logic ---
+        const statusButton = document.getElementById('status-button');
+        const statusText = document.getElementById('status-text');
+        const statusRing = document.getElementById('status-ring');
+        const systemStatusText = document.getElementById('system-status-text');
+        const overlay = document.getElementById('emergency-overlay');
+        const cancelBtn = document.getElementById('cancel-panic');
+
+        function setPanicState(isPressed, lat = null, lon = null) {
+            if (isPressed) {
+                // RED STATE: Pressed
+                statusButton.classList.replace('bg-hardware-green', 'bg-hardware-accent');
+                statusButton.classList.replace('shadow-[0_0_20px_rgba(0,200,83,0.3)]', 'shadow-[0_0_40px_rgba(255,68,68,0.6)]');
+                statusText.textContent = "Button Pressed";
+                statusRing.classList.remove('opacity-0');
+                statusRing.classList.replace('border-hardware-green/20', 'border-hardware-accent/20');
+                
+                systemStatusText.textContent = "EMERGENCY ACTIVE";
+                systemStatusText.classList.replace('text-hardware-green', 'text-hardware-accent');
+                
+                // Show critical overlay if not already visible
+                if (overlay.classList.contains('hidden')) {
+                    overlay.classList.remove('hidden');
+                    overlay.classList.add('flex');
+                    addHistoryEvent("Emergency SOS Triggered", lat, lon, true);
+                }
+            } else {
+                // GREEN STATE: Safe
+                if (statusButton.classList.contains('bg-hardware-accent')) {
+                    addHistoryEvent("System Secured / Safe", lat, lon, false);
+                }
+                statusButton.classList.replace('bg-hardware-accent', 'bg-hardware-green');
+                statusButton.classList.replace('shadow-[0_0_40px_rgba(255,68,68,0.6)]', 'shadow-[0_0_20px_rgba(0,200,83,0.3)]');
+                statusText.textContent = "System Safe";
+                statusRing.classList.add('opacity-0');
+                statusRing.classList.replace('border-hardware-accent/20', 'border-hardware-green/20');
+                
+                systemStatusText.textContent = "Nominal / Online";
+                systemStatusText.classList.replace('text-hardware-accent', 'text-hardware-green');
+            }
+        }
+
+        function addHistoryEvent(message, lat = null, lon = null, isCritical = false) {
+            const history = document.getElementById('event-history');
+            const item = document.createElement('div');
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+            const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+            const locStr = (lat && lon) ? `${lat.toFixed(4)}°, ${lon.toFixed(4)}°` : "Signal Acquired";
+
+            item.className = "flex items-start space-x-3 p-3 bg-white/5 rounded-2xl border border-white/5 transition-all duration-500 transform translate-y-2 opacity-0";
+            item.innerHTML = `
+                <div class="w-px h-12 bg-white/10 mt-1 relative">
+                    <div class="absolute top-0 -left-1 w-2 h-2 rounded-full ${isCritical ? 'bg-hardware-accent' : 'bg-hardware-secondary'} shadow-[0_0_8px_rgba(255,68,68,0.4)]"></div>
+                </div>
+                <div class="flex-1">
+                    <p class="text-xs font-bold ${isCritical ? 'text-hardware-accent' : 'text-white'}">${message}</p>
+                    <div class="flex flex-wrap gap-x-4 mt-1">
+                        <p class="text-[10px] text-hardware-secondary font-mono uppercase flex items-center">
+                            <i data-lucide="calendar" class="w-3 h-3 mr-1"></i>${dateStr}
+                        </p>
+                        <p class="text-[10px] text-hardware-secondary font-mono uppercase flex items-center">
+                            <i data-lucide="clock" class="w-3 h-3 mr-1"></i>${timeStr}
+                        </p>
+                    </div>
+                    <p class="text-[10px] text-hardware-secondary font-mono mt-1 flex items-center">
+                        <i data-lucide="map-pin" class="w-3 h-3 mr-1 text-hardware-accent"></i>LOC: ${locStr}
+                    </p>
+                </div>
+            `;
+            
+            history.prepend(item);
+            
+            // Re-initialize icons for the new element
+            lucide.createIcons();
+            
+            // Animation trigger
+            setTimeout(() => {
+                item.classList.remove('translate-y-2', 'opacity-0');
+            }, 50);
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
+        });
+
+        // --- Socket.IO & Data Integration ---
+        const socket = io(); 
+
+        socket.on('connect', () => {
+            console.log('Connected to dashboard server');
+            systemStatusText.textContent = "Nominal / Online";
+        });
+
+        socket.on('new_event', (data) => {
+            console.log('New Event Received:', data);
+            const latest = data.latest;
+            const events = data.events;
+
+            if (latest) {
+                // Update Location
+                const lat = latest.latitude || defaultLat;
+                const lon = latest.longitude || defaultLon;
+
+                // Set visual state based on button_pressed property
+                setPanicState(latest.button_pressed === true, lat, lon);
+                
+                const latStr = lat.toFixed(4);
+                const lonStr = lon.toFixed(4);
+                
+                // Update Display Text
+                const locationDisplay = document.querySelector('span.text-xs.font-mono');
+                if (locationDisplay) locationDisplay.textContent = `${latStr}° N, ${lonStr}° E`;
+
+                // Update Map
+                marker.setLatLng([lat, lon]);
+                map.panTo([lat, lon]);
+                
+                // Update Path
+                if (events && events.length > 0) {
+                    const sortedEvents = events.sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
+                    const points = sortedEvents.map(e => [e.latitude, e.longitude]);
+                    pathLine.setLatLngs(points);
+                }
+
+                document.getElementById('map-update-time').textContent = new Date().toLocaleTimeString();
+            }
+        });
+
+        // --- Periodic Simulation / Simulation Handler ---
+        function updateEnvironment() {
+            // These would normally come from weather_monitor thread via Firebase
+            const condition = "Clear"; 
+            const danger = false;
+
+            document.getElementById('weather-condition').textContent = condition;
+            document.getElementById('weather-description').textContent = "Conditions optimal for outdoor transit.";
+            
+            if (danger) {
+                document.getElementById('danger-alert').classList.remove('hidden');
+                document.getElementById('safe-alert').classList.add('hidden');
+                document.getElementById('weather-card').classList.add('border-red-500/30');
+            } else {
+                document.getElementById('danger-alert').classList.add('hidden');
+                document.getElementById('safe-alert').classList.remove('hidden');
+                document.getElementById('weather-card').classList.remove('border-red-500/30');
+            }
+        }
+
+        // --- Startup ---
+        initMap();
+        setInterval(updateClock, 1000);
+        updateClock();
+        setTimeout(updateEnvironment, 2000);
+
+    </script>
+</body>
+</html>
