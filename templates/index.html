@@ -16,8 +16,15 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Socket.IO -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
     
     <script>
+        const firebaseConfig = {{ firebase_web_config | tojson }};
+        if (firebaseConfig && firebaseConfig.apiKey) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
         tailwind.config = {
             darkMode: 'class',
             theme: {
